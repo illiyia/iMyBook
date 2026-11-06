@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iMyBook - My Reading List</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>iMyBook</h1>
+        <p>Your personal reading list</p>
+    </header>
+
+    <nav>
+        <a href="index.html">Search Books</a>
+        <a href="readlist.html" class="active">My Reading List</a>
+        <a href="suggest.html">Suggestions</a>
+        <a href="planner.html">Reader's Planner</a>
+    </nav>
+
+    <div class="toolbar">
+        <label for="filterStatus">Show:</label>
+        <select id="filterStatus">
+            <option value="All">All books</option>
+            <option value="Want to read">Want to read</option>
+            <option value="Reading">Reading</option>
+            <option value="Finished">Finished</option>
+        </select>
+    </div>
+    <p id="summary"></p>
+    <p id="message"></p>
+    <div id="list"></div>
+
+    <script src="common.js"></script>
+    <script>
+        const listEl = document.getElementById('list');
+        const message = document.getElementById('message');
+        const summary = document.getElementById('summary');
+        const filterSelect = document.getElementById('filterStatus');
+
+        let editingId = null;   // which book is in edit mode
+        let deletingId = null;  // which book is waiting for delete confirmation
+
+        filterSelect.addEventListener('change', () => {
+            editingId = null;
+            deletingId = null;
+            renderList();
+        });
+
+        // show saved books
+        function renderList() {
+            const all = loadList();
+            const filter = filterSelect.value;
+            const items = filter === 'All' ? all : all.filter(item => item.status === filter);
+
+            listEl.innerHTML = '';
+
+            if (all.length === 0) {
+                summary.textContent = '';
+                listEl.appendChild(buildEmpty('Your reading list is empty.', true));
+                return;
+            }
+
+            summary.textContent = `Showing ${items.length} of ${all.length} book(s)`;
+
+            if (items.length === 0) {
+                listEl.appendChild(buildEmpty('No books with this status yet.', false));
+                return;
+            }
+
+            items.forEach(item => listEl.appendChild(buildEntry(item)));
+        }
+
+        function buildEmpty(text, withLink) {
+            const box = document.createElement('div');
+            box.className = 'empty';
+            box.textContent = text + ' ';
+            if (withLink) {
+                const link = document.createElement('a');
+                link.href = 'index.html';
+                link.textContent = 'Search for a book to add.';
+                box.appendChild(link);
+            }
+            return box;
+        }
+
+        function buildCover(item) {
+            if (item.coverId) {
+                const img = document.createElement('img');
+                img.className = 'cover';
+                img.alt = item.title;
+                img.loading = 'lazy';
+                img.src = coverUrl(item.coverId);
+                img.onerror = () => img.replaceWith(makePlaceholder(item.title));
+                return img;
+            }
+            return makePlaceholder(item.title);
+        }
+
+        function buildEntry(item) {
+            const entry = document.createElement('div');
+            entry.className = 'entry';
+            entry.appendChild(buildCover(item));
+
+            const body = document.createElement('div');
+            body.className = 'entry-body';
+
+            const title = document.createElement('h3');
+            title.textContent = item.title;
+
+            const author = document.createElement('p');
+            author.className = 'author';
+            author.textContent = item.author + (item.year ? ' · ' + item.year : '');
+
+            body.appendChild(title);
+            body.appendChild(author);
+            body.appendChild(editingId === item.id ? buildEditForm(item) : buildDetails(item));
+
+            entry.appendChild(body);
+            return entry;
+        }
+
+        // status, pages, notes, edit and delete
+        function buildDetails(item) {
+            const wrap = document.createElement('div');
+
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = item.status;
+
+            const pages = document.createElement('p');
+            pages.className = 'meta';
+            pages.textContent = item.pages ? `Pages: ${item.pages}` : 'Pages: not set';
+
+            const notes = document.createElement('p');
+            notes.className = 'meta';
+            notes.textContent = item.notes ? `Notes: ${item.notes}` : 'Notes: -';
+
+            const actions = document.createElement('div');
+            actions.className = 'entry-actions';
+
+            if (deletingId === item.id) {
+                // confirmation
+                const question = document.createElement('span');
+                question.className = 'confirm-text';
+                question.textContent = 'Remove this book?';
+
+                const yes = makeButton('Yes, remove', 'btn btn-danger', () => {
+                    const result = deleteBook(item.id);
+                    deletingId = null;
+                    showMessage(message, result.message, result.ok ? 'ok' : 'error');
+                    renderList();
+                });
+                const no = makeButton('Cancel', 'btn btn-light', () => {
+                    deletingId = null;
+                    renderList();
+                });
+                actions.append(question, yes, no);
+            } else {
+                const edit = makeButton('Edit', 'btn btn-dark', () => {
+                    editingId = item.id;
+                    deletingId = null;
+                    renderList();
+                });
+                // start delete
+                const del = makeButton('Delete', 'btn btn-danger', () => {
+                    deletingId = item.id;
+                    editingId = null;
+                    renderList();
+                });
+                actions.append(edit, del);
+            }
+
+            wrap.append(badge, pages, notes, actions);
+            return wrap;
+        }
+
+        function makeLabel(text) {
+            const label = document.createElement('label');
+            label.textContent = text;
+            return label;
+        }
+
+        // UPDATE: edit form
+        function buildEditForm(item) {
+            const form = document.createElement('div');
+            form.className = 'edit-form';
+
+            const statusSelect = document.createElement('select');
+            STATUSES.forEach(s => {
+                const option = document.createElement('option');
+                option.value = s;
+                option.textContent = s;
+                if (s === item.status) option.selected = true;
+                statusSelect.appendChild(option);
+            });
+
+            const pagesInput = document.createElement('input');
+            pagesInput.type = 'number';
+            pagesInput.min = '1';
+            pagesInput.max = '10000';
+            pagesInput.placeholder = 'Total pages (optional)';
+            pagesInput.value = item.pages;
+
+            const notesInput = document.createElement('textarea');
+            notesInput.maxLength = 200;
+            notesInput.placeholder = 'Your notes (max 200 characters)';
+            notesInput.value = item.notes;
+
+            const formError = document.createElement('p');
+            formError.className = 'form-error';
+
+            const actions = document.createElement('div');
+            actions.className = 'entry-actions';
+
+            const save = makeButton('Save', 'btn btn-dark', () => {
+                const result = updateBook(item.id, {
+                    status: statusSelect.value,
+                    pages: pagesInput.value.trim(),
+                    notes: notesInput.value.trim()
+                });
+
+                if (result.ok) {
+                    editingId = null;
+                    showMessage(message, result.message, 'ok');
+                    renderList();
+                } else {
+                    formError.textContent = result.message;
+                }
+            });
+            const cancel = makeButton('Cancel', 'btn btn-light', () => {
+                editingId = null;
+                renderList();
+            });
+            actions.append(save, cancel);
+
+            form.append(
+                makeLabel('Status'), statusSelect,
+                makeLabel('Total pages'), pagesInput,
+                makeLabel('Notes'), notesInput,
+                formError, actions
+            );
+            return form;
+        }
+
+        renderList();
+    </script>
+</body>
+</html>

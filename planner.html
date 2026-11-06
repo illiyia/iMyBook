@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iMyBook - Reading Planner</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .form-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 14px; padding: 16px 20px 4px; }
+        .field { display: flex; flex-direction: column; gap: 4px; }
+        .field label { font-size: 13px; font-weight: 600; color: var(--subtitle); padding-left: 6px; }
+        .field input {
+            min-width: 220px;
+            padding: 10px 16px;
+            border-radius: 999px;
+            border: 2px solid transparent;
+            background: var(--card);
+            color: var(--card-text);
+            font-size: 14px;
+            outline: none;
+        }
+        .field input::placeholder { color: var(--card-muted); }
+        .field input:focus { border-color: #ffffff; }
+        .summary {
+            max-width: 760px;
+            margin: 16px auto 0;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            text-align: center;
+            font-size: 15px;
+        }
+        .result { margin: 8px 0 0; font-size: 14px; font-weight: 700; color: var(--card-text); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>iMyBook</h1>
+        <p>A planner for your reading</p>
+    </header>
+
+    <nav>
+        <a href="index.html">Search Books</a>
+        <a href="readlist.html">My Reading List</a>
+        <a href="suggest.html">Suggestions</a>
+        <a href="planner.html" class="active">Reading Planner</a>
+    </nav>
+
+    <div class="form-row">
+        <div class="field">
+            <label for="paceInput">Pages read per day</label>
+            <input type="number" id="paceInput" min="1" max="1000" placeholder="e.g. 20">
+        </div>
+        <button id="calcButton" class="btn btn-light">Calculate</button>
+    </div>
+
+    <p id="message"></p>
+    <div id="summary" class="summary" hidden></div>
+    <div id="list"></div>
+
+    <script src="common.js"></script>
+    <script>
+        const PACE_KEY = 'imybook_pace';
+
+        const paceInput = document.getElementById('paceInput');
+        const calcButton = document.getElementById('calcButton');
+        const message = document.getElementById('message');
+        const summary = document.getElementById('summary');
+        const listEl = document.getElementById('list');
+
+        calcButton.addEventListener('click', calculatePlan);
+        paceInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') calculatePlan();
+        });
+
+        // calculate pages
+        // hari = pages / pages per day, rounded UP (e.g. 321 pages at 20/day = 17 days)
+        function daysToFinish(pages, pagesPerDay) {
+            return Math.ceil(pages / pagesPerDay);
+        }
+
+        // expect hari habis = harini + bilangan hari
+        function finishDate(days) {
+            const date = new Date();
+            date.setDate(date.getDate() + days);
+            return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        // validate input, pastu baru kira
+        function calculatePlan() {
+            const raw = paceInput.value.trim();
+
+            if (raw === '') {
+                showMessage(message, 'Please enter how many pages you read per day.', 'error');
+                return;
+            }
+
+            const pace = Number(raw);
+            if (!Number.isInteger(pace) || pace < 1 || pace > 10000) {
+                showMessage(message, 'Pages per day must be a whole number from 1 to 10000.', 'error');
+                return;
+            }
+
+            try {
+                localStorage.setItem(PACE_KEY, String(pace));
+            } catch (error) {
+                console.error('Could not save pace:', error);
+            }
+
+            renderPlan(pace);
+        }
+
+        function buildEmpty(text, href, linkText) {
+            const box = document.createElement('div');
+            box.className = 'empty';
+            box.textContent = text + ' ';
+            if (href) {
+                const link = document.createElement('a');
+                link.href = href;
+                link.textContent = linkText;
+                box.appendChild(link);
+            }
+            return box;
+        }
+
+        function buildCover(item) {
+            if (item.coverId) {
+                const img = document.createElement('img');
+                img.className = 'cover';
+                img.alt = item.title;
+                img.loading = 'lazy';
+                img.src = coverUrl(item.coverId);
+                img.onerror = () => img.replaceWith(makePlaceholder(item.title));
+                return img;
+            }
+            return makePlaceholder(item.title);
+        }
+
+        // result
+        function renderPlan(pace) {
+            const all = loadList();
+            listEl.innerHTML = '';
+            summary.hidden = true;
+
+            if (all.length === 0) {
+                listEl.appendChild(buildEmpty('Your reading list is empty.', 'index.html', 'Search for a book to add.'));
+                return;
+            }
+
+            // buku yang dah habis tak perlu ada plan
+            const active = all.filter(item => item.status !== 'Finished');
+            if (active.length === 0) {
+                listEl.appendChild(buildEmpty('You have finished all your book. Congrats!', '', ''));
+                return;
+            }
+
+            let totalPages = 0;
+            let counted = 0;
+
+            active.forEach(item => {
+                const pages = Number(item.pages);
+                listEl.appendChild(buildPlanEntry(item, pages, pace));
+                if (pages > 0) {
+                    totalPages += pages;
+                    counted++;
+                }
+            });
+
+            if (counted > 0) {
+                const totalDays = daysToFinish(totalPages, pace);
+                summary.textContent = counted + ' book(s) · ' + totalPages + ' pages in total · about '
+                    + totalDays + ' day(s) at ' + pace + ' pages/day · finish all by ' + finishDate(totalDays);
+                summary.hidden = false;
+            }
+        }
+
+        function buildPlanEntry(item, pages, pace) {
+            const entry = document.createElement('div');
+            entry.className = 'entry';
+            entry.appendChild(buildCover(item));
+
+            const body = document.createElement('div');
+            body.className = 'entry-body';
+
+            const title = document.createElement('h3');
+            title.textContent = item.title;
+
+            const author = document.createElement('p');
+            author.className = 'author';
+            author.textContent = item.author;
+
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = item.status;
+
+            const pagesLine = document.createElement('p');
+            pagesLine.className = 'meta';
+            pagesLine.textContent = pages > 0 ? 'Pages: ' + pages : 'Pages: not set';
+
+            const result = document.createElement('p');
+            if (pages > 0) {
+                const days = daysToFinish(pages, pace);
+                result.className = 'result';
+                result.textContent = '≈ ' + days + ' day(s) at ' + pace + ' pages/day · finish by ' + finishDate(days);
+            } else {
+                result.className = 'form-error';
+                result.textContent = 'Set the number of pages to see the estimate. You can edit them in Reading List.';
+            }
+
+            body.append(title, author, badge, pagesLine, result);
+            entry.appendChild(body);
+            return entry;
+        }
+
+        // restore last pace 
+        try {
+            const saved = Number(localStorage.getItem(PACE_KEY));
+            if (Number.isInteger(saved) && saved >= 1 && saved <= 1000) {
+                paceInput.value = saved;
+                renderPlan(saved);
+            } else {
+                listEl.appendChild(buildEmpty('Enter how many pages you read per day, then press Calculate.', '', ''));
+            }
+        } catch (error) {
+            console.error('Could not read pace:', error);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iMyBook - Search</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>iMyBook</h1>
+        <p>Search any book, discover your next read</p>
+    </header>
+
+    <nav>
+        <a href="index.html" class="active">Search Books</a>
+        <a href="readlist.html">My Reading List</a>
+        <a href="suggest.html">Suggestions</a>
+        <a href="planner.html">Reader's Planner</a>
+    </nav>
+
+    <div class="search">
+        <input type="text" id="searchInput" placeholder="Search book title">
+        <button id="searchButton" class="btn btn-light">Search</button>
+    </div>
+    <p id="status"></p>
+    <p id="message"></p>
+    <div id="results"></div>
+
+    <script src="common.js"></script>
+    <script>
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const statusText = document.getElementById('status');
+        const message = document.getElementById('message');
+        const results = document.getElementById('results');
+
+        searchButton.addEventListener('click', searchBooks);
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') searchBooks();
+        });
+
+        // Fetch books from Open Library and show them
+        function searchBooks() {
+            const query = searchInput.value.trim();
+            if (!query) {
+                statusText.textContent = 'Please enter a book title.';
+                return;
+            }
+
+            statusText.textContent = 'Loading...';
+            message.textContent = '';
+            results.innerHTML = '';
+
+            const url = 'https://openlibrary.org/search.json?q='
+                + encodeURIComponent(query)
+                + '&fields=key,title,author_name,first_publish_year,cover_i,number_of_pages_median&limit=18';
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.docs || data.docs.length === 0) {
+                        statusText.textContent = 'No books found.';
+                        return;
+                    }
+                    statusText.textContent = data.docs.length + ' books found';
+                    data.docs.forEach(showBook);
+                })
+                .catch(error => {
+                    statusText.textContent = 'Error: could not load books (' + error + ')';
+                });
+        }
+
+        // Build one book card
+        function showBook(book) {
+            const id = book.key;
+            const card = document.createElement('div');
+            card.className = 'book';
+
+            if (book.cover_i) {
+                const img = document.createElement('img');
+                img.className = 'cover';
+                img.alt = book.title;
+                img.loading = 'lazy';
+                img.src = coverUrl(book.cover_i);
+                img.onerror = () => img.replaceWith(makePlaceholder(book.title));
+                card.appendChild(img);
+            } else {
+                card.appendChild(makePlaceholder(book.title));
+            }
+
+            const info = document.createElement('div');
+            info.className = 'info';
+
+            const title = document.createElement('h3');
+            title.textContent = book.title;
+
+            const author = document.createElement('p');
+            author.className = 'author';
+            author.textContent = book.author_name ? book.author_name[0] : 'Unknown author';
+
+            const year = document.createElement('p');
+            year.className = 'year';
+            year.textContent = book.first_publish_year ? 'First published ' + book.first_publish_year : '';
+
+            info.appendChild(title);
+            info.appendChild(author);
+            info.appendChild(year);
+            card.appendChild(info);
+
+            // Button to save this book into the reading list (CREATE)
+            const addButton = document.createElement('button');
+            addButton.className = 'btn add-btn';
+
+            if (isInList(id)) {
+                addButton.textContent = '✓ In your list';
+                addButton.disabled = true;
+            } else {
+                addButton.textContent = '+ Add to list';
+                addButton.addEventListener('click', () => {
+                    const result = addBook({
+                        id: id,
+                        title: book.title,
+                        author: book.author_name ? book.author_name[0] : 'Unknown author',
+                        year: book.first_publish_year || '',
+                        coverId: book.cover_i || null,
+                        pages: book.number_of_pages_median || ''
+                    });
+                    showMessage(message, result.message, result.ok ? 'ok' : 'error');
+                    if (isInList(id)) {
+                        addButton.textContent = '✓ In your list';
+                        addButton.disabled = true;
+                    }
+                });
+            }
+
+            card.appendChild(addButton);
+            results.appendChild(card);
+        }
+    </script>
+</body>
+</html>

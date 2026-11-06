@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iMyBook - Suggestions</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .form-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 14px; padding: 16px 20px 4px; }
+        .field { display: flex; flex-direction: column; gap: 4px; }
+        .field label { font-size: 13px; font-weight: 600; color: var(--subtitle); padding-left: 6px; }
+        .field select, .field input {
+            min-width: 180px;
+            padding: 10px 16px;
+            border-radius: 999px;
+            border: 2px solid transparent;
+            background: var(--card);
+            color: var(--card-text);
+            font-size: 14px;
+            outline: none;
+        }
+        .field input::placeholder { color: var(--card-muted); }
+        .field select:focus, .field input:focus { border-color: #ffffff; }
+        .stats { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--card-text); }
+        .reason { margin: 6px 0 0; font-size: 12px; font-style: italic; color: var(--card-muted); }
+        h2.section { text-align: center; font-family: Georgia, serif; margin: 28px 0 6px; }
+        #recent { max-width: 760px; margin: 8px auto 16px; padding: 0 20px; display: flex; flex-direction: column; gap: 10px; }
+        .recent-item { background: rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 10px 14px; font-size: 13px; }
+        .recent-item strong { color: var(--accent); }
+        .clear-wrap { text-align: center; padding-bottom: 40px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>iMyBook</h1>
+        <p>Get book suggestions that match your taste</p>
+    </header>
+
+    <nav>
+        <a href="index.html">Search Books</a>
+        <a href="readlist.html">My Reading List</a>
+        <a href="suggest.html" class="active">Suggestions</a>
+        <a href="planner.html">Reader's Planner</a>
+    </nav>
+
+    <div class="form-row">
+        <div class="field">
+            <label for="genreSelect">Genre</label>
+            <select id="genreSelect">
+                <option value="">-- Choose genre --</option>
+                <option value="fantasy">Fantasy</option>
+                <option value="romance">Romance</option>
+                <option value="science fiction">Science Fiction</option>
+                <option value="mystery">Mystery</option>
+                <option value="horror">Horror</option>
+                <option value="biography">Biography</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="levelSelect">Reader level</label>
+            <select id="levelSelect">
+                <option value="beginner">Beginner (short books)</option>
+                <option value="casual" selected>Casual</option>
+                <option value="avid">Avid reader</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="authorInput">Author (optional)</label>
+            <input type="text" id="authorInput" placeholder="e.g. Agatha Christie">
+        </div>
+        <button id="suggestButton" class="btn btn-light">Suggest books</button>
+    </div>
+
+    <p id="status"></p>
+    <p id="message"></p>
+    <div id="results"></div>
+
+    <h2 class="section">Recent suggestions</h2>
+    <div id="recent"></div>
+    <div class="clear-wrap">
+        <button id="clearButton" class="btn btn-dark">Clear history</button>
+    </div>
+
+    <script src="common.js"></script>
+    <script>
+        const SUGGEST_KEY = 'imybook_suggestions';
+
+        const genreSelect = document.getElementById('genreSelect');
+        const levelSelect = document.getElementById('levelSelect');
+        const authorInput = document.getElementById('authorInput');
+        const suggestButton = document.getElementById('suggestButton');
+        const clearButton = document.getElementById('clearButton');
+        const statusText = document.getElementById('status');
+        const message = document.getElementById('message');
+        const results = document.getElementById('results');
+        const recentBox = document.getElementById('recent');
+
+        suggestButton.addEventListener('click', getSuggestions);
+        clearButton.addEventListener('click', clearHistory);
+
+        // suggestions
+        // kena decides buku tu sesuai ke tidak untuk user
+        function judgeBook(book, level) {
+            const pages = book.number_of_pages_median;
+            const rating = book.ratings_average;
+            const year = book.first_publish_year;
+
+            // page count and rating nak judge buku
+            if (!pages || !rating) {
+                return { suitable: false, reason: '' };
+            }
+
+            // sets the page limits and rates
+            let maxPages;
+            let minRating;
+            switch (level) {
+                case 'beginner':
+                    maxPages = 300;
+                    minRating = 3.5;
+                    break;
+                case 'casual':
+                    maxPages = 450;
+                    minRating = 3.8;
+                    break;
+                case 'avid':
+                    maxPages = 1500;
+                    minRating = 4.0;
+                    break;
+                default:
+                    maxPages = 450;
+                    minRating = 3.8;
+            }
+
+            if (pages > maxPages || rating < minRating) {
+                return { suitable: false, reason: '' };
+            }
+
+            // sebab benda tu keluar dekat user
+            let reason;
+            if (year && year < 1980) {
+                reason = 'High rated classics.';
+            } else if (rating >= 4.3) {
+                reason = 'Readers favourite';
+            } else if (pages <= 250) {
+                reason = 'Quick read, easy to absorp.';
+            } else {
+                reason = 'Well-rated books fits to your preferences.';
+            }
+
+            return { suitable: true, reason: reason };
+        }
+
+        // fetch n filter
+        function getSuggestions() {
+            const genre = genreSelect.value;
+            const level = levelSelect.value;
+            const author = authorInput.value.trim();
+
+            // input validation
+            if (!genre) {
+                showMessage(message, 'Choose a genre first.', 'error');
+                return;
+            }
+            if (author.length > 50) {
+                showMessage(message, 'Author name must be 50 characters or less.', 'error');
+                return;
+            }
+
+            statusText.textContent = 'Finding suggestions...';
+            message.textContent = '';
+            results.innerHTML = '';
+
+            let url = 'https://openlibrary.org/search.json?subject=' + encodeURIComponent(genre)
+                + '&sort=rating&limit=40'
+                + '&fields=key,title,author_name,first_publish_year,cover_i,number_of_pages_median,ratings_average';
+            if (author) {
+                url += '&author=' + encodeURIComponent(author);
+            }
+
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Server error ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // takde result from API
+                    if (!data.docs || data.docs.length === 0) {
+                        statusText.textContent = 'No books found for this genre'
+                            + (author ? ' and author' : '') + '. Try a different combination.';
+                        return;
+                    }
+
+                    // 6 buku yang okay
+                    const picks = [];
+                    data.docs.forEach(book => {
+                        if (picks.length >= 6) return;
+                        const verdict = judgeBook(book, level);
+                        if (verdict.suitable) {
+                            picks.push({ book: book, reason: verdict.reason });
+                        }
+                    });
+
+                    // bila takde yang sesuai
+                    if (picks.length === 0) {
+                        statusText.textContent = 'No suitable suggestion for the "' + level
+                            + '" level. Try another level or remove the author.';
+                        return;
+                    }
+
+                    statusText.textContent = picks.length + ' suggestion(s) for you';
+                    picks.forEach(showSuggestion);
+                    saveSuggestions(picks, genre, level);
+                    renderRecent();
+                })
+                .catch(error => {
+                    statusText.textContent = 'Could not load suggestions (' + error.message + ')';
+                });
+        }
+
+        // suggestion card
+        function showSuggestion(pick) {
+            const book = pick.book;
+            const id = book.key;
+            const authorName = book.author_name ? book.author_name[0] : 'Unknown author';
+
+            const card = document.createElement('div');
+            card.className = 'book';
+
+            if (book.cover_i) {
+                const img = document.createElement('img');
+                img.className = 'cover';
+                img.alt = book.title;
+                img.loading = 'lazy';
+                img.src = coverUrl(book.cover_i);
+                img.onerror = () => img.replaceWith(makePlaceholder(book.title));
+                card.appendChild(img);
+            } else {
+                card.appendChild(makePlaceholder(book.title));
+            }
+
+            const info = document.createElement('div');
+            info.className = 'info';
+
+            const title = document.createElement('h3');
+            title.textContent = book.title;
+
+            const author = document.createElement('p');
+            author.className = 'author';
+            author.textContent = authorName;
+
+            const stats = document.createElement('p');
+            stats.className = 'stats';
+            stats.textContent = book.number_of_pages_median + ' pages · ★ ' + book.ratings_average.toFixed(1);
+
+            const reason = document.createElement('p');
+            reason.className = 'reason';
+            reason.textContent = pick.reason;
+
+            info.append(title, author, stats, reason);
+            card.appendChild(info);
+
+            // button untuk saved dalam reading list guna create dari common.js
+            const addButton = document.createElement('button');
+            addButton.className = 'btn add-btn';
+
+            if (isInList(id)) {
+                addButton.textContent = '✓ In your list';
+                addButton.disabled = true;
+            } else {
+                addButton.textContent = '+ Add to list';
+                addButton.addEventListener('click', () => {
+                    const result = addBook({
+                        id: id,
+                        title: book.title,
+                        author: authorName,
+                        year: book.first_publish_year || '',
+                        coverId: book.cover_i || null,
+                        pages: book.pages || ''
+                    });
+                    showMessage(message, result.message, result.ok ? 'ok' : 'error');
+                    if (isInList(id)) {
+                        addButton.textContent = '✓ In your list';
+                        addButton.disabled = true;
+                    }
+                });
+            }
+
+            card.appendChild(addButton);
+            results.appendChild(card);
+        }
+
+        // local storage untuk saved suggestions
+        function loadSuggestions() {
+            try {
+                const raw = localStorage.getItem(SUGGEST_KEY);
+                const data = raw ? JSON.parse(raw) : [];
+                return Array.isArray(data) ? data : [];
+            } catch (error) {
+                console.error('Could not read suggestions:', error);
+                return [];
+            }
+        }
+
+        function saveSuggestions(picks, genre, level) {
+            let saved = loadSuggestions();
+
+            // best pick dekat atas
+            picks.slice().reverse().forEach(pick => {
+                saved = saved.filter(item => item.id !== pick.book.key);
+                saved.unshift({
+                    id: pick.book.key,
+                    title: pick.book.title,
+                    author: pick.book.author_name ? pick.book.author_name[0] : 'Unknown author',
+                    genre: genre,
+                    level: level,
+                    reason: pick.reason,
+                    savedAt: new Date().toISOString()
+                });
+            });
+
+            saved = saved.slice(0, 10);   // keep the latest 10 only
+            localStorage.setItem(SUGGEST_KEY, JSON.stringify(saved));
+        }
+
+        function renderRecent() {
+            const saved = loadSuggestions();
+            recentBox.innerHTML = '';
+
+            if (saved.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty';
+                empty.textContent = 'No suggestions saved yet.';
+                recentBox.appendChild(empty);
+                return;
+            }
+
+            saved.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'recent-item';
+
+                const name = document.createElement('strong');
+                name.textContent = item.title;
+
+                const detail = document.createElement('span');
+                detail.textContent = ' by ' + item.author + ' · ' + item.genre + ' · '
+                    + item.level + ' · ' + new Date(item.savedAt).toLocaleDateString();
+
+                const why = document.createElement('div');
+                why.textContent = item.reason;
+
+                row.append(name, detail, why);
+                recentBox.appendChild(row);
+            });
+        }
+
+        function clearHistory() {
+            localStorage.removeItem(SUGGEST_KEY);
+            renderRecent();
+            showMessage(message, 'Suggestion history cleared.', 'ok');
+        }
+
+        renderRecent();
+    </script>
+</body>
+</html>

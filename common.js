@@ -15,7 +15,7 @@ function loadList() {
     }
 }
 
-//Save the whole list back to local storage as JSON text
+//save semua list dalam local storage sebagai JSON text
 function saveList(list) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }

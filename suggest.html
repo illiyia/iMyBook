@@ -192,10 +192,10 @@
                         return;
                     }
 
-                    // 6 buku yang okay
+                    // 7 buku yang okay
                     const picks = [];
                     data.docs.forEach(book => {
-                        if (picks.length >= 6) return;
+                        if (picks.length >= 14) return;
                         const verdict = judgeBook(book, level);
                         if (verdict.suitable) {
                             picks.push({ book: book, reason: verdict.reason });
